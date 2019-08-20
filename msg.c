@@ -47,9 +47,9 @@ msg* tomsg(char* request,int fd){
     int len=atoi(tmp);
     req->len=len;
 
-    tmp=__strtok_r(NULL," \n",&ptr);
+    tmp=__strtok_r(NULL," ",&ptr);//ptr should now point to the start of the message "data" field
     req->data=malloc(len);
-    memcpy(req->data,tmp,len);
+    memcpy(req->data,ptr,len);
     return req;
 }
 void printmsg(msg* message){

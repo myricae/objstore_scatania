@@ -1,6 +1,6 @@
+#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <stdlib.h>
 #include <stdio.h>
 #include <stdio.h>
 #include <string.h>
@@ -18,11 +18,12 @@ void sendko(int fd,char* msg){
         fprintf(stderr,"sendko: send to fd %d failed, wrote %d bytes\n",fd,wrote);
         client->on=0;
     }
+    free(buf);
 }
 void sendok(int fd){
     int wrote;
     if((wrote=send(fd,"OK \n",5,0))!=5) {
-        fprintf(stderr,"sendok: send to fd %d failed, wrote %d bytes",fd,wrote);
+        fprintf(stderr,"sendok: send to fd %d failed, wrote %d bytes\n",fd,wrote);
         client->on=0;
     }
 }
@@ -56,7 +57,7 @@ int s_readline(int fd, char *buf,int capacity){
 
     while((res=poll(fds,1,10))==0) {
         time++;
-        if(VERBOSE) fprintf(stderr,"s_readline: poll on socket timed out.\n");
+        if(VERBOSE && !time%20) fprintf(stderr,"s_readline: poll on socket timed out.\n");
         if(time>5000) {//timeout fixed at 5s
             fprintf(stderr,"s_readline: server not responding.\n");
             goto end; 

@@ -1,16 +1,21 @@
 #include "objstore.h"
 #include "support.h"
 
+#define ERRSTR_LEN 128
 //TO DO: convertire write in send
 static int cfd=-1,ret;
-static int connected=0;
+static int connected=0,letti;
 char* request=NULL,*answer=NULL;
-#define verb(s)\
-    if(VERBOSE) fprintf(stderr,s)
+char* errstr[ERRSTR_LEN];
+
 #define except_retrieve(cfd,answer,fun)\
-    if(s_readline(cfd,answer,MAX_HEADER)){\
-        printf("%s",answer);\
-        if(answer[0]=='O') ret=1;\
+    if((letti=s_readline(cfd,answer,MAX_HEADER))){\
+        if(letti){\
+            answer[letti]='\0';\
+            fprintf(stderr,"%s\n",answer);\
+            if(answer[0]=='O') ret=1;\
+            else ret=0;\
+        }\
         else ret=0;\
     }\
     else{\
@@ -29,13 +34,13 @@ int os_connect(char *name){
         ifmeno_usr(cfd=socket(addr.sun_family,SOCK_STREAM,0),"os_connect: problems creating socket");
         ifmeno_usr(connect(cfd,(struct sockaddr*)&addr,sizeof(addr)),"os_connect: problems with connect: ");
         connected=1;
-        int dim=40,len;//40= maximum server answer size for STORE
-        request=malloc(len=(strlen("REGISTER  \n")+strlen(name)));
-        answer=malloc(40);
-        sprintf(request,"REGISTER %s \n",name);
+        int len=strlen("REGISTER  \n")+strlen(name);
+        request=calloc(len,sizeof(char));
+        answer=malloc(64);//40= maximum server answer size for STORE
+        snprintf(request,len,"REGISTER %s \n",name);
         int scritti;
-        if((scritti=write(cfd,request,strlen(request)))!=len) fprintf(stderr,"os_connect: problems sending request.");
-        if(VERBOSE) printf("Scritti sul socket=strlen(request)? %d",scritti==len);
+        if((scritti=send(cfd,request,len,0))!=len) fprintf(stderr,"os_connect: problems sending request.");
+        if(VERBOSE) printf("Scritti sul socket=strlen(request)? %d\n",scritti==len);
         except_retrieve(cfd,answer,"os_connect");
     }
     else {
@@ -47,10 +52,12 @@ int os_connect(char *name){
 
 int os_disconnect(){
     if(connected){
-        answer=malloc(sizeof(char)*40);
-        write(cfd,"LEAVE \n",sizeof("LEAVE \n"));
+        request=malloc(1);//for except_retrieve macro compatibility
+        answer=malloc(sizeof(char)*64);
+        send(cfd,"LEAVE \n",sizeof("LEAVE \n"),0);
         except_retrieve(cfd,answer,"os_disconnect");
         connected=0;
+
         close(cfd);
         ret=1;
     }
@@ -62,11 +69,11 @@ int os_disconnect(){
 }
 int os_delete(char *name){
     if(name && connected) {
-        int len;
-        request=malloc(len=(strlen("DELETE  \n")+strlen(name)));
-        answer=malloc(sizeof(char)*40);
-        sprintf(request,"DELETE %s \n",name);
-        if(write(cfd,request,strlen(request)!=len)) {
+        int len=(strlen("DELETE  \n")+strlen(name));
+        request=calloc(len,sizeof(char));
+        answer=malloc(sizeof(char)*64);
+        snprintf(request,len,"DELETE %s \n",name);
+        if(send(cfd,request,len,0)!=len) {
             fprintf(stderr,"os_delete: write on socket failed.\n");
             free(request);
             free(answer);
@@ -85,11 +92,12 @@ int os_delete(char *name){
 }
 int os_store(char *name, void *block, size_t len){
     if(name && connected) {
-        request=malloc(sizeof(char)*(MAX_COMMAND+sizeof(block)));
-        answer=malloc(sizeof(char)*40);
+        request=malloc(sizeof(char)*(MAX_COMMAND+len));
+        answer=malloc(sizeof(char)*64);
         sprintf(request,"STORE %s %d \n %s",name,(int)len,(char*)block);
         int n=strlen(request);
-        if(write(cfd,request,strlen(request))!=n) {
+        
+        if(send(cfd,request,n,0)!=n) {
             fprintf(stderr,"os_store: write on socket failed.");
             free(answer);
             free(request);
@@ -111,8 +119,8 @@ void *os_retrieve(char *name){
     if(name && connected) {
         int len=strlen("RETRIEVE  \n")+strlen(name);
         request=malloc(len);
-        sprintf(request,"RETRIEVE %s \n",name);
-        if(write(cfd,request,strlen(request))!=len) {
+        snprintf(request,len,"RETRIEVE %s \n",name);
+        if(send(cfd,request,strlen(request),0)!=len) {
             fprintf(stderr,"os_store: write on socket failed.");
             free(answer);
             free(request);

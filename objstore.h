@@ -11,6 +11,7 @@
 #include <poll.h>
 #include "macros.h"
 
+
 /* – inizia la connessione all'object store, registrando il cliente con il
 name dato. Restituisce true se la connessione ha avuto successo, false altrimenti. Notate che la
 connessione all'object store è globale per il client.*/

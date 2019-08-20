@@ -1,11 +1,12 @@
+#include <stdlib.h>
+#include <stdio.h>
+
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
 #include <limits.h>
-#include <stdlib.h>
-#include <stdio.h>
 #include <unistd.h>
 
 #include <pthread.h>
@@ -60,9 +61,9 @@ static void* sighandler(void* arg){
     else{
         if(VERBOSE) printf("\nAccolto segnale: %d\n",sig);
         switch(sig){
-            case SIGINT://||SIGTERM:
+            case SIGINT||SIGTERM:
                 os_running=0;
-                if(VERBOSE) printf("RUNNING=0\n");
+                if(VERBOSE) printf("os_running=0\n");
                 break;
             case SIGUSR1:
                 pthread_create(&tid,NULL,stats,NULL);
@@ -80,8 +81,8 @@ static void* dispatcher(void* arg){
     int sfd=*(int*)arg,fdc;
     pthread_t tid;
     while(os_running){
-        if((fdc=accept(sfd,NULL,0))==-1) perror("main: Accept failed. \n");
-        else pthread_create(&tid,NULL,worker,(void*)&fdc);
+        if((fdc=accept(sfd,NULL,0))==-1) {if(os_running) perror("main: Accept failed. \n"); break;}//recheck on os_running in case value has
+        else pthread_create(&tid,NULL,worker,(void*)&fdc);                                 //changed inside "while" while "accept" was blocking
     }
     if(VERBOSE) printf("Dispatcher uscito.\n");
     pthread_exit((void*)NULL);
@@ -123,16 +124,14 @@ int main() {
     //client listener
     pthread_create(&disp,NULL,dispatcher,(void*)&sfd);
 
-    if(VERBOSE) printf("main: Prima della join\n");
+    if(VERBOSE) printf("main: Prima di joinare sighandler\n");
     pthread_join(handler_t,NULL);
-
-    //pthread_cancel(disp); DETACHED
     
     pthread_mutex_lock(&mtx);
     while(connessi>0) pthread_cond_wait(&zero_conn,&mtx);
     pthread_mutex_unlock(&mtx);
-
-    if(VERBOSE) printf("main: client disconnessi.\n");
+    
+    if(VERBOSE) printf("main: %d client connessi.\n",(int)connessi);
     destroy(ht);
     close(sfd);
     if(VERBOSE) printf("main: ht distrutta, connessione chiusa.\n");
@@ -141,7 +140,7 @@ int main() {
             fprintf(stderr,"main: Socket not found.\n");
         }
         else{
-            fprintf(stderr,"main:Problems deliting file. \n");
+            fprintf(stderr,"main: Problems deliting socket. \n");
         }
     }
     if(VERBOSE) printf("main: socket file deleted, exiting.\n");
