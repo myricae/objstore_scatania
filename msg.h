@@ -6,5 +6,5 @@ typedef struct _msg{
     char* data;
     int valid;
 }msg;
-msg* tomsg(char* request,int fd);
+msg* tomsg(char* request,int fd,int* header_len);
 void printmsg(msg* message);

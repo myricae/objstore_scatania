@@ -39,9 +39,8 @@ tryclient: tryclient.c objstore.o support.o
 support.o: support.c support.h
 	$(CC) $(CFLAGS0) $< -o $@
 
-test: cleardata#prima c'era \@ 
-	#./os_server &
-	./testscript.sh 10
+test: cleardata#prima c'era \@ ./os_server &
+	./testscript.sh 1
 
 cleardata:
 	@$(RM) -r data/*

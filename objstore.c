@@ -12,7 +12,7 @@ char* errstr[ERRSTR_LEN];
     if((letti=s_readline(cfd,answer,MAX_HEADER))){\
         if(letti){\
             answer[letti]='\0';\
-            fprintf(stderr,"%s\n",answer);\
+            fprintf(stderr,"%s",answer);\
             if(answer[0]=='O') ret=1;\
             else ret=0;\
         }\
@@ -22,8 +22,7 @@ char* errstr[ERRSTR_LEN];
         fprintf(stderr,"%s: impossible to read from server.\n",fun);\
         ret=0;\
     }\
-    free(answer);\
-    free(request);
+    free(answer);
 
 int os_connect(char *name){
     
@@ -34,13 +33,13 @@ int os_connect(char *name){
         ifmeno_usr(cfd=socket(addr.sun_family,SOCK_STREAM,0),"os_connect: problems creating socket");
         ifmeno_usr(connect(cfd,(struct sockaddr*)&addr,sizeof(addr)),"os_connect: problems with connect: ");
         connected=1;
-        int len=strlen("REGISTER  \n")+strlen(name);
-        request=calloc(len,sizeof(char));
+        //int len=strlen("REGISTER  \n")+strlen(name);
+        //request=calloc(len,sizeof(char));
         answer=malloc(64);//40= maximum server answer size for STORE
-        snprintf(request,len,"REGISTER %s \n",name);
-        int scritti;
-        if((scritti=send(cfd,request,len,0))!=len) fprintf(stderr,"os_connect: problems sending request.");
-        if(VERBOSE) printf("Scritti sul socket=strlen(request)? %d\n",scritti==len);
+        dprintf(cfd,"REGISTER %s \n",name);
+        //int scritti;
+        //if((scritti=send(cfd,request,len,0))!=len) fprintf(stderr,"os_connect: problems sending request.");
+        //if(VERBOSE) printf("Scritti sul socket=strlen(request)? %d\n",scritti==len);
         except_retrieve(cfd,answer,"os_connect");
     }
     else {
@@ -52,9 +51,9 @@ int os_connect(char *name){
 
 int os_disconnect(){
     if(connected){
-        request=malloc(1);//for except_retrieve macro compatibility
+        //request=malloc(1);//for except_retrieve macro compatibility
         answer=malloc(sizeof(char)*64);
-        send(cfd,"LEAVE \n",sizeof("LEAVE \n"),0);
+        dprintf(cfd,"LEAVE \n");
         except_retrieve(cfd,answer,"os_disconnect");
         connected=0;
 
@@ -69,11 +68,11 @@ int os_disconnect(){
 }
 int os_delete(char *name){
     if(name && connected) {
-        int len=(strlen("DELETE  \n")+strlen(name));
-        request=calloc(len,sizeof(char));
+        //int len=(strlen("DELETE  \n")+strlen(name));
+        //request=calloc(len,sizeof(char));
         answer=malloc(sizeof(char)*64);
-        snprintf(request,len,"DELETE %s \n",name);
-        if(send(cfd,request,len,0)!=len) {
+        //snprintf(request,len,"DELETE %s \n",name);
+        if(dprintf(cfd,"DELETE %s \n",name)) {
             fprintf(stderr,"os_delete: write on socket failed.\n");
             free(request);
             free(answer);
@@ -92,18 +91,20 @@ int os_delete(char *name){
 }
 int os_store(char *name, void *block, size_t len){
     if(name && connected) {
-        request=malloc(sizeof(char)*(MAX_COMMAND+len));
         answer=malloc(sizeof(char)*64);
-        sprintf(request,"STORE %s %d \n %s",name,(int)len,(char*)block);
-        int n=strlen(request);
-        
-        if(send(cfd,request,n,0)!=n) {
-            fprintf(stderr,"os_store: write on socket failed.");
+        int dim;
+        char* request=malloc(sizeof(char)*(1+MAX_HEADER +len));
+
+        sprintf(request,"STORE %s %zu \n %s",name,len,(char*)block);
+        dim=strlen(request);
+        if(send(cfd,request,dim,0)!=dim){
+            fprintf(stderr,"os_store: write of data block on socket failed.");
             free(answer);
             free(request);
             ret=0;
         }
-        else {
+        else{
+            free(request);
             except_retrieve(cfd,answer,"os_store");
         }
     }
@@ -120,28 +121,41 @@ void *os_retrieve(char *name){
         int len=strlen("RETRIEVE  \n")+strlen(name);
         request=malloc(len);
         snprintf(request,len,"RETRIEVE %s \n",name);
-        if(send(cfd,request,strlen(request),0)!=len) {
-            fprintf(stderr,"os_store: write on socket failed.");
-            free(answer);
-            free(request);
+        if(send(cfd,request,len,0)!=len) {
+            perror("os_retrieve: ");
         }
         else{
             char* buf=malloc(MAX_BUFFSIZE);
-            s_readline(cfd,buf,MAX_BUFFSIZE);
-            if(!strncmp(buf,"DATA ",5)){
-                char* ptr,*tmp;
-                __strtok_r(buf," ",&ptr);
-                tmp=__strtok_r(NULL," ",&ptr);
-                int datalen=atoi(tmp);
-                tmp=__strtok_r(NULL," \n",&ptr);
-                void* ret_v=malloc(datalen);
-                memcpy(ret_v,tmp,datalen);
-                free(buf);
+            int red;
+            if((red=s_readline(cfd,buf,MAX_BUFFSIZE))>0){
+                if(!strncmp(buf,"DATA ",5)){
+                    if(VERBOSE) {fprintf(stderr,"os_retrieve: complete message: ");fwrite(buf,1,red,stderr);fprintf(stderr,"\n");}
+                    char* ptr,*tmp;
+                    __strtok_r(buf," ",&ptr);
+                    tmp=__strtok_r(NULL," ",&ptr);
+                    int datalen=atoi(tmp);
+                    if(VERBOSE) fprintf(stderr,"os_retrieve: message len=%d\n",datalen);
+                    tmp=__strtok_r(NULL," ",&ptr);//ptr should now point to the start of the message "data" field
+                    if(VERBOSE) {fprintf(stderr,"os_retrieve: message data:");fwrite(ptr,1,datalen,stderr);fprintf(stderr,"\n");}
+                    ret_v=malloc(datalen);
+                    memcpy(ret_v,ptr,datalen);
+                    if(VERBOSE) {
+                        fprintf(stderr,"os_retrieve: ");
+                        if(ret_v==NULL) fprintf(stderr,"ret_v=NULL");
+                        else fwrite(ret_v,1,datalen,stderr);
+                        fprintf(stderr,"\n");
+                    } 
+                    free(buf);
+                }
+                else{
+                    fprintf(stderr,"os_retrieve: communication protocol error.\n");
+                }
             }
             else{
-                fprintf(stderr,"os_retrieve: communication protocol error.");
+                fprintf(stderr,"os_retrieve: invalid read from socket.\n");
             }
         }
+        free(request);
     }
     else {
         if(!connected) fprintf(stderr,"os_store: not connected.\n");

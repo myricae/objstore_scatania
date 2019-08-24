@@ -4,12 +4,14 @@
 #include "macros.h"
 #include "msg.h"
 #include "support.h"
-msg* tomsg(char* request,int fd){
+msg* tomsg(char* request,int fd,int * header_len){
     char* ptr;
     msg* req=malloc(sizeof(msg));
     req->data=req->name=NULL; 
     req->valid=1;
+    int com_len,len_len,name_len;
     char* token=__strtok_r(request," ",&ptr);
+    com_len=strlen(token);
     if(!strcmp(token,"REGISTER")){
         req->com=REGISTER;
     }
@@ -31,25 +33,37 @@ msg* tomsg(char* request,int fd){
         return req;
     }
 
+    char* tmp;
+
     if(req->com!=LEAVE){
-        char* tmp=__strtok_r(NULL," ",&ptr);
+        tmp=__strtok_r(NULL," ",&ptr);
         if(tmp==NULL) { req->valid=0;sendko(fd,"Wrong syntax."); return req;}
         req->name=malloc(strlen(tmp)+1);
         strcpy(req->name,tmp);
+        name_len=strlen(req->name);
     }
 
     if(req->com!=STORE) return req;
 
     //Handling STORE command
 
-    char* tmp=__strtok_r(NULL," ",&ptr);
+    tmp=__strtok_r(NULL," ",&ptr);
     if(tmp==NULL) { req->valid=0;sendko(fd,"Wrong syntax."); return req;}
-    int len=atoi(tmp);
-    req->len=len;
+    len_len=strlen(tmp);
+    req->len=atoi(tmp);;
 
+    *header_len=com_len+name_len+len_len+5;//5= 1 '\n' + 4 ' ' (+1 after STORE,+1 after NAME,+1 after DATALEN & +1 after '\n')
     tmp=__strtok_r(NULL," ",&ptr);//ptr should now point to the start of the message "data" field
-    req->data=malloc(len);
-    memcpy(req->data,ptr,len);
+    int residue=MAX_BUFFSIZE-*header_len;
+    if(residue>req->len){
+        req->data=calloc(req->len,sizeof(char));
+        memcpy(req->data,tmp+2,req->len);
+        if(VERBOSE){ fprintf(stderr,"Allocating directly in req->data: ");
+        fwrite(req->data,1,req->len,stderr);
+        fprintf(stderr,"\n");
+        }
+    }
+    else req->data=ptr;
     return req;
 }
 void printmsg(msg* message){
@@ -79,7 +93,9 @@ void printmsg(msg* message){
         printf("Name: %s\n",message->name);
         if(message->com!=STORE) return;
         printf("Length: %u\n",message->len);
-        printf("(String) Data block: %s\n",message->data);
+        printf("(String) Data block: ");
+        fwrite(message->data,1,sizeof(message->data),stdout);
+        printf("\n");
     }
     return;
 }

@@ -4,7 +4,7 @@
 #define SOCKNAME "sock"
 #define MAX_COMMAND 255
 //#define PATH_MAX 255
-#define MAX_HEADER 40
+#define MAX_HEADER 64
 #define MAX_BUFFSIZE 1024 
 #define DATADIR "./data/"
 

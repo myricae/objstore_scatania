@@ -10,6 +10,51 @@
 #include <pthread.h>
 #include <string.h>
 client_t *client;
+
+void handle_store(char* full_path,int fd,msg* message,int header_len){
+    FILE* new;
+
+    if(VERBOSE) fprintf(stderr,"worker: handle_store: header_len=%d\n",header_len);
+    if((new=fopen(full_path,"ab"))==NULL) sendko(fd,"Problems creating file.");
+    else{
+        int red,wrote,firstwrite,more=0;
+        if(MAX_BUFFSIZE-header_len>=message->len)//just one fwrite if(sizeof(req->data)) 
+            firstwrite=message->len;
+        else {firstwrite=MAX_BUFFSIZE-header_len; more=1;}
+        if((wrote=fwrite(message->data,1,firstwrite,new))!=firstwrite){
+                sendko(fd,"Problems writing file.");
+                fprintf(stderr,"worker: handle_store: just one write: fwrite wrote %d/%d bytes.\n",wrote,firstwrite);
+        }
+        int step=firstwrite;
+        if(more){
+            char* buf=malloc(sizeof(char)*MAX_BUFFSIZE);
+            int capacity,residue=message->len-step;
+            while(residue>0){
+                if(residue>MAX_BUFFSIZE) capacity=MAX_BUFFSIZE;
+                else capacity=residue;
+                if((red=s_readline(fd,buf,capacity))!=capacity) {
+                    if(VERBOSE) fprintf(stderr,"worker: handlestore: s_readline failed. red %d bytes off %d capacity \n",red,capacity);
+                    sendko(fd,"Problems writing file.");
+                    break;
+                }
+                else{
+                    if((wrote=fwrite(buf,1,red,new))!=red) {
+                        if(VERBOSE) fprintf(stderr,"worker: handlestore: fwrite failed. wrote %d bytes off %d red \n",wrote,red);
+                        sendko(fd,"Problems writing file."); 
+                        break;
+                    }
+                    else
+                        step+=red;
+                }
+                residue=message->len-step;
+                fprintf(stderr,"worker: handlestore: byte letti %d/%d, da leggere %d\n",step,message->len,residue);
+            }
+            free(buf);
+        }
+    }
+    fclose(new);
+    sendok(fd);
+}
 //Clean-up routines
 static void dec_signal(void* arg){
     if(VERBOSE) fprintf(stderr,"pop dec_signal\n");
@@ -32,8 +77,8 @@ static void freemsg(void* arg){
 static void client_cleanup(void* arg){
     if(VERBOSE) fprintf(stderr,"pop client_cleanup\n");
     client_t *c=(client_t*)arg;
-    free(c->name);
-    free(c->path);
+    if(c->name)free(c->name);
+    if(c->path)free(c->path);
     close(client->fd);
     free(c);
 }
@@ -52,19 +97,19 @@ void* worker(void * arg){
     pthread_cleanup_push(&client_cleanup,(void*)client);
     if(VERBOSE) fprintf(stderr,"push client_cleanup(client_t)\n");
     
-    char* request=(char*)malloc(sizeof(char)*MAX_COMMAND);
+    char* request=(char*)malloc(sizeof(char)*MAX_BUFFSIZE);
     pthread_cleanup_push(&ffree,(void*)request);
     if(VERBOSE) fprintf(stderr,"push ffree(request)\n");
 
     msg* message=NULL;
 
     while (os_running && client->on) {
-        int red;
-        if((red=s_readline(client->fd,request,MAX_COMMAND))) {
-            request[red]='\0';
-            if(VERBOSE) printf("worker: while->request: %s\n",request);
+        int red,header_len;
+        memset(request,0,MAX_BUFFSIZE);
+        if((red=s_readline(client->fd,request,MAX_BUFFSIZE))>0) {
+            if(VERBOSE) {fprintf(stderr,"worker: while: "); fwrite(request,1,red,stderr); fprintf(stderr,"\n");}
 
-            message=tomsg(request,client->fd);
+            message=tomsg(request,client->fd,&header_len);
             pthread_cleanup_push(&freemsg,(void*)message);
 
             if(message!=NULL && message->valid){
@@ -72,7 +117,6 @@ void* worker(void * arg){
                 if(message->com==REGISTER){
                     int res;
                     if(!client->reg){
-                        //TO DO: MUTEX SU ACCESSI A HT
                         if(!exists(message->name,ht)){
                             add(message->name,ht);
                             client->name=malloc(strlen(message->name)+1);
@@ -108,18 +152,12 @@ void* worker(void * arg){
                             sendok(client->fd);
                         }
                         else if(message->com==STORE){
-                            FILE* new;//new file pointer on which that data block is written
                             char* full_path=malloc(strlen(client->path)+strlen(message->name)+1);
                             strcpy(full_path,client->path);
                             strcat(full_path,message->name);
                             
-                            if((new=fopen(full_path,"wb"))==NULL) sendko(client->fd,"Problems creating file.");
-                            else{
-                                if(fwrite(message->data,1,message->len,new)!=message->len) sendko(client->fd,"Problems writing data to file.");
-                                else sendok(client->fd);
-                            }
+                            handle_store(full_path,client->fd,message,header_len);
                             free(full_path);
-                            fclose(new);
                         }
                         else if(message->com==RETRIEVE){
                             char* full_path,*data;
@@ -130,15 +168,26 @@ void* worker(void * arg){
                             full_path=malloc(strlen(client->path)+strlen(message->name)+1);
                             strcpy(full_path,client->path);
                             strcat(full_path,message->name);
-
+                            
                             if((f=fopen(full_path,"rb"))==NULL) sendko(client->fd,"Problems opening file requested by retrieve.");
                             else{
-                                if((len=fseek(f,0,SEEK_END))==-1) sendko(client->fd,"Zero-dimensioned file.");
+                                fseek(f,0,SEEK_END);
+                                if((len=ftell(f))==-1) sendko(client->fd,"Zero-dimensioned file.");
                                 else{
                                     rewind(f);
                                     data=malloc(len);
                                     if(fread(data,1,len,f)!=len) sendko(client->fd,"Problems reading file requested by retrieve.");
-                                    else sendok_retr(client->fd,len,data);
+                                    else {
+                                        if(VERBOSE) {
+                                            fprintf(stderr,"worker: retrieve: data len: %d | data path: %s | ",len,full_path);
+                                            fprintf(stderr,"message data: ");
+                                            fflush(stderr);
+                                            fwrite(data,1,len,stderr);
+                                            fflush(stderr);
+                                            fprintf(stderr,"\n");
+                                        }
+                                        sendok_retr(client->fd,len,data);
+                                    }
                                 }
                             }
                             free(full_path);

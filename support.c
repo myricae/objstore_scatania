@@ -28,23 +28,19 @@ void sendok(int fd){
     }
 }
 void sendok_retr(int fd,int len,char* data){
-    char* length=malloc(32);
+    char* length=malloc(sizeof(char)*32);
     sprintf(length,"%d",len);
-    length=realloc(length,strlen(length));
-
-    char* buf=malloc(strlen("DATA ")+strlen(length)+strlen(" \n "));
-    strcpy(buf,"DATA ");
-    strcat(buf,length);
+    int digits=strlen(length);
     free(length);
-    strcat(buf," \n ");
 
-    int size=strlen(buf);
-    //sending header of RETRIEVE response 
+    int header=strlen("DATA ")+digits+strlen(" \n ");
+    char* buf=malloc(sizeof(char)*(header+len+1));
+    sprintf(buf,"DATA %d \n ",len); 
+    strncat(buf+header,data,len);
+    int size=header+len;
     if(send(fd,buf,size,0)!=size) {
+        if(VERBOSE) fprintf(stderr,"sendok_retr: send failed.\n");
         sendko(fd,"Problems sending retrieve response header.");
-    }
-    else{
-        if(send(fd,data,len,0)!=len) sendko(fd,"Incomplete send of data block.");
     }
     free(buf);
 }
@@ -63,7 +59,7 @@ int s_readline(int fd, char *buf,int capacity){
             goto end; 
         }
     }  
-    if(res==-1) perror("s_readline: ");
+    if(res==-1) perror("s_readline, poll errno: ");
     else {//event occurred on socket
         if(POLLIN & fds[0].revents){//there is data to read on socket
             len=recv(fd,buf,capacity,0);
@@ -73,7 +69,7 @@ int s_readline(int fd, char *buf,int capacity){
                 else fprintf(stderr,"s_readline: red %d bytes.\n",len);
             }
         }
-        else fprintf(stderr,"s_readline: other event on socket occured");//should not happen? Didn't request other events
+        else fprintf(stderr,"s_readline: other event on socket occured\n");//should not happen? Didn't request other events
     }
     end:return len;
 }
