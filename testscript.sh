@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 WRITE=$1
-READ=$(($1 * 3/5));
+READ=$(($1 * 3/5))
 DELETE=$(($1 * 2/5))
 
 WORDS=$(shuf -n$WRITE /usr/share/dict/italian)

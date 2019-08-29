@@ -7,12 +7,12 @@
 #define test_str "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Praesent iaculis arcu eu tempor cras amet.\n"
 #define test_strlen 100
 
-static int failed_tests = 0;
+static ssize_t failed_tests = 0;
 
 //Create 20 strings, with sizes ranging from 55 * 100 to
 char *repeat_str(int n) {
     char *repeat = (char*)calloc(test_strlen * n, sizeof(char));
-    int seek = 0;
+    size_t seek = 0;
     while (seek < test_strlen * n - 100) {
         memcpy(repeat + seek, test_str, 100);
         seek = seek + test_strlen;
@@ -23,6 +23,9 @@ char *repeat_str(int n) {
 
 int test1() {
     if (!os_store("Object1", test_str, test_strlen)) {
+        #ifdef ERRSTR 
+            printf("%s", ERRSTR);
+        #endif
         failed_tests++;
         return 0;
     }
@@ -33,6 +36,9 @@ int test1() {
         char *str = repeat_str(i * 55);
         if (!os_store(name, str, i * test_strlen * 55)) {
             free(str);
+            #ifdef ERRSTR 
+                printf("%s", ERRSTR);
+            #endif
             failed_tests++;
             return 0;
         }
@@ -41,6 +47,9 @@ int test1() {
     char *str = repeat_str(1000);
     if (!os_store("Object20", str, 1000 * test_strlen)) {
         free(str);
+        #ifdef ERRSTR 
+            printf("%s", ERRSTR);
+        #endif
         failed_tests++;
         return 0;
     }
@@ -52,6 +61,9 @@ int test1() {
 int test2() {
     char *str_first = os_retrieve("Object1");
     if (!(str_first && strlen(str_first) == 100)) {
+        #ifdef ERRSTR
+            printf("%s", ERRSTR);
+        #endif
         failed_tests++;
         free(str_first);
         return 0;
@@ -63,6 +75,9 @@ int test2() {
         sprintf(name, "Object%d", i);
         char *str = os_retrieve(name);
         if (!(str && strlen(str) + 1 == (i - 1) * test_strlen * 55)) {
+            #ifdef ERRSTR
+                printf("%s", ERRSTR);
+            #endif
             failed_tests++;
             free(str);
             return 0;
@@ -71,6 +86,9 @@ int test2() {
     }
     char *str_last = os_retrieve("Object20");
     if (!(str_last && strlen(str_last) + 1 == 100000)) {
+        #ifdef ERRSTR
+            printf("%s", ERRSTR);
+        #endif
         failed_tests++;
         free(str_last);
         return 0;
@@ -86,6 +104,9 @@ int test3() {
         memset(name, 0, 128);
         sprintf(name, "Object%d", i);
         if (!os_delete(name)) {
+            #ifdef ERRSTR
+                printf("%s", ERRSTR);
+            #endif
             failed_tests++;
             os_disconnect();
             return 0;
@@ -99,20 +120,20 @@ int main(int argc, char *argv[]) {
     if (os_connect(argv[1]) && argv[2]) {
         switch (atoi(argv[2])) {
             case 1:
-                printf("Test passati: %d\n", 20 - failed_tests);
-                printf("Test fallito: %d\n", failed_tests);
+                printf("Test passati: %ld\n", 20 - failed_tests);
+                printf("Test fallito: %ld\n", failed_tests);
                 return !test1();
                 break;
 
             case 2:
-                printf("Test passati: %d\n", 20 - failed_tests);
-                printf("Test fallito: %d\n", failed_tests);
+                printf("Test passati: %ld\n", 20 - failed_tests);
+                printf("Test fallito: %ld\n", failed_tests);
                 return !test2();
                 break;
 
             case 3:
-                printf("Test passati: %d\n", 20 - failed_tests);
-                printf("Test fallito: %d\n", failed_tests);
+                printf("Test passati: %ld\n", 20 - failed_tests);
+                printf("Test fallito: %ld\n", failed_tests);
                 return !test3();
                 break;
 

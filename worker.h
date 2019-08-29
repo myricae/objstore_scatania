@@ -6,9 +6,6 @@
 #include "htable.h"
 //#include "msg.h"
 
-#ifndef VERBOSE
-#define VERBOSE 1
-#endif
 extern volatile sig_atomic_t connessi,os_running;
 extern pthread_cond_t zero_conn;
 extern pthread_mutex_t mtx;

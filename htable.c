@@ -12,7 +12,7 @@
 #include "macros.h"
 #define ERR_EXIT(s)\
     fprintf(stderr,s);\
-    exit(EXIT_FAILURE)
+    re
 
 static pthread_rwlock_t *locks;
 unsigned int DJBHash(char* str, unsigned int len)
@@ -55,8 +55,8 @@ int exists(char* name,node** ht){
     return ret;
 }
 int add(char* name,node** ht){
-    if(ht==NULL) {ERR_EXIT("OS: Empty hash table.\n");}
-    if(name==NULL || *name=='\0') {ERR_EXIT("OS: Invalid user name, exiting.\n");}
+    if(ht==NULL) {fprintf(stderr,"htable: add: invalid hash table\n.");return -1;}
+    if(name==NULL || *name=='\0') {fprintf(stderr,"htable: add: invalid user name, exiting.\n"); return -1;}
     node* new=(node*)malloc(sizeof(node));
     new->name=(char*)malloc(sizeof(char)*strlen(name)+1);
     strcpy(new->name,name);

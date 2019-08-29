@@ -1,75 +1,153 @@
 #include <stdlib.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 #include <poll.h>
 #include "support.h"
 #include "macros.h"
 
-client_t *client;
-void sendko(int fd,char* msg){
-    char* buf=malloc(strlen(msg)+5+1);
-    sprintf(buf,"KO %s\n",msg);
-    
-    int wrote,len=strlen(buf);
-    if((wrote=send(fd,buf,len,0))!=len) {
-        fprintf(stderr,"sendko: send to fd %d failed, wrote %d bytes\n",fd,wrote);
-        client->on=0;
-    }
-    free(buf);
-}
-void sendok(int fd){
-    int wrote;
-    if((wrote=send(fd,"OK \n",5,0))!=5) {
-        fprintf(stderr,"sendok: send to fd %d failed, wrote %d bytes\n",fd,wrote);
-        client->on=0;
-    }
-}
-void sendok_retr(int fd,int len,char* data){
-    char* length=malloc(sizeof(char)*32);
-    sprintf(length,"%d",len);
-    int digits=strlen(length);
-    free(length);
+extern client_t *client;
+int readn(int fd, char *buf, int n){
+    memset(buf,0,n);
 
-    int header=strlen("DATA ")+digits+strlen(" \n ");
-    char* buf=malloc(sizeof(char)*(header+len+1));
-    sprintf(buf,"DATA %d \n ",len); 
-    strncat(buf+header,data,len);
-    int size=header+len;
-    if(send(fd,buf,size,0)!=size) {
-        if(VERBOSE) fprintf(stderr,"sendok_retr: send failed.\n");
-        sendko(fd,"Problems sending retrieve response header.");
+    int  left=n,red;
+    char* ptr=buf;
+
+    if(waitdata(fd)){
+        while(left>0){
+            if ((red=read(fd, ptr, left))<0){
+                if(errno==EINTR)//interrupt by signal, we could still have data to read
+                    red=0;
+                else{
+                    perror("readn: ");
+                    return -1;
+                }
+            }
+            else if(!red) break;
+            left-=red;
+            ptr+=red;
+        }
+        return n-left;
     }
-    free(buf);
+    else return -1;
 }
-int s_readline(int fd, char *buf,int capacity){
+int writen(int fd,char* buf,int n){
+    int left=n,wrote;
+    char* ptr=buf;
+    while(left>0){
+        if((wrote=write(fd,ptr,left))<=0){
+            if(wrote<0){
+                if(errno==EINTR) wrote=0;
+                else{
+                    perror("writen: ");
+                    return -1;
+                }
+            }
+            else if (wrote==0){
+                fprintf(stderr,"writen: wrote 0 bytes.\n");
+                return -1;
+            }
+        }
+        left-=wrote;
+        ptr+=wrote;
+    }
+    return n;
+}
+int sendko(int fd,char* msg){
+    if((dprintf(fd,"KO %s \n",msg))<0) {
+        if(VERBOSE)
+            perror("sendko,shutting off client: dprintf: ");
+        return 0;
+    }
+    return 1;
+}
+int sendok(int fd){
+    if((dprintf(fd,"OK \n"))<0) {
+        if(VERBOSE)
+            perror("sendok,shutting off client: dprintf: ");
+        return 0;
+    }
+    return 1;
+}
+int sendok_retr(int fd,int datalen,FILE* f){
+    if(dprintf(fd,"DATA %d \n ",datalen)<0){
+        if(VERBOSE) {
+            perror("sendok_retr: dprintf: ");
+        }
+        return 0;
+    }
+    else{
+        char buf[datalen];
+        int red;
+        if((red=fread(buf,1,datalen,f))!=datalen){
+            if(VERBOSE){
+                if(red<0) perror("sendok_retr: fread: ");
+                else fprintf(stderr,"sendok_retr: fread red %d bytes instead of datalen %d\n",red,datalen);
+            }
+            return 0;
+        }
+        else{
+            if(writen(fd,buf,datalen)<0){
+                fprintf(stderr,"sendok_retr: writen failed.\n");
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+int waitdata(int fd){
     int res;
     
     struct pollfd fds[1];
     fds[0]=(struct pollfd){fd, POLLIN, 0};
-    int len=0,time=0;
+    int time=0;
 
     while((res=poll(fds,1,10))==0) {
         time++;
-        if(VERBOSE && !time%20) fprintf(stderr,"s_readline: poll on socket timed out.\n");
-        if(time>5000) {//timeout fixed at 5s
-            fprintf(stderr,"s_readline: server not responding.\n");
-            goto end; 
+        if(VERBOSE && !time%20) fprintf(stderr,"waitdata: poll on socket timed out.\n");
+        if(time>TIMEOUT) {//timeout fixed at 2s: 10ms*200=2s
+            if(VERBOSE)fprintf(stderr,"waitdata: server not responding.\n");
+            break;
         }
     }  
-    if(res==-1) perror("s_readline, poll errno: ");
-    else {//event occurred on socket
-        if(POLLIN & fds[0].revents){//there is data to read on socket
-            len=recv(fd,buf,capacity,0);
-            if(VERBOSE){
-                if(len==0) fprintf(stderr,"s_readline: red 0 bytes.\n");
-                else if(len<0) fprintf(stderr,"s_readline: client disconnected.\n");
-                else fprintf(stderr,"s_readline: red %d bytes.\n",len);
-            }
-        }
-        else fprintf(stderr,"s_readline: other event on socket occured\n");//should not happen? Didn't request other events
+    if(res==-1) {
+        perror("waitdata: poll: ");
+        return 0;
     }
-    end:return len;
+    else {//event occurred on socket
+        if(POLLIN & fds[0].revents) return 1;//there is data to read on socket
+        if(POLLHUP & fds[0].revents) {
+            perror("waitdata: poll: ");
+            return 0;
+        }
+    }
+    return 0;
+}
+int getheader(int fd,char* buf,int maxlen){
+    memset(buf,0,maxlen);
+
+    if(!waitdata(fd)){
+        fprintf(stderr,"getheader: waitdata failed, no data to read on socket.\n");
+        return -1;
+    }
+    int n,red;
+    for(n=1;n<maxlen;n++){//n<maxlen because we terminate the header with a \0
+        if((red=read(fd,buf+n-1,1))<0){
+            if(errno==EINTR) n--;
+            else return -1;
+        }
+        else if(red==0){//no more data to read
+            *(buf+n-1)='\0';
+            return n-1;
+        }
+        else{//1 byte has been red
+            if(*(buf+n-1)=='\n') break;
+        }
+    }
+    *(buf+n)='\0';
+    if(VERBOSE) fprintf(stderr,"getheader result: -%s-",buf);
+    return n;
 }

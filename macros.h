@@ -1,11 +1,11 @@
 #ifndef MACROS_H
 #define MACROS_H
 #define VERBOSE 1
+#define TIMEOUT 200
 #define SOCKNAME "sock"
-#define MAX_COMMAND 255
-//#define PATH_MAX 255
-#define MAX_HEADER 64
-#define MAX_BUFFSIZE 1024 
+#define MAX_HEADER 512
+#define MAX_BUFFSIZE 2048
+#define OKO_MAXLEN 64
 #define DATADIR "./data/"
 
 #define ifmeno_usr(c,s) \

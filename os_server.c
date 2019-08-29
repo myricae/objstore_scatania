@@ -113,7 +113,7 @@ int main() {
     address.sun_family=AF_UNIX;
     strcpy(address.sun_path,SOCKNAME);
 
-    ifminus(sfd=socket(AF_UNIX,SOCK_STREAM,0),"main: Creating socket. \n");
+    ifminus(sfd=socket(address.sun_family,SOCK_STREAM,0),"main: Creating socket. \n");
     ifminus(bind(sfd,(struct sockaddr*)&address,sizeof(address)),"main: Bind failed. \n");
     ifminus(listen(sfd,SOMAXCONN),"main: Listen failed.\n");
 

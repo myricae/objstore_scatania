@@ -2,16 +2,16 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "macros.h"
+#include <assert.h>
 #include "msg.h"
 #include "support.h"
-msg* tomsg(char* request,int fd,int * header_len){
+msg* tomsg(char* request,int fd){
     char* ptr;
     msg* req=malloc(sizeof(msg));
-    req->data=req->name=NULL; 
+    req->name=NULL;
+    if(request[strlen(request)-1]!='\n') {req->valid=0;fprintf(stderr,"Message doesn't end with newline.\n");return req;} 
     req->valid=1;
-    int com_len,len_len,name_len;
     char* token=__strtok_r(request," ",&ptr);
-    com_len=strlen(token);
     if(!strcmp(token,"REGISTER")){
         req->com=REGISTER;
     }
@@ -29,41 +29,50 @@ msg* tomsg(char* request,int fd,int * header_len){
     }
     else {
         req->valid=0;
+        fprintf(stderr,"Unknown command.\n");
         sendko(fd,"Unknown command.");
         return req;
     }
 
-    char* tmp;
+    token=__strtok_r(NULL," ",&ptr);
+    if(token==NULL) { req->valid=0;fprintf(stderr,"Wrong command syntax.\n"); return req;}
 
-    if(req->com!=LEAVE){
-        tmp=__strtok_r(NULL," ",&ptr);
-        if(tmp==NULL) { req->valid=0;sendko(fd,"Wrong syntax."); return req;}
-        req->name=malloc(strlen(tmp)+1);
-        strcpy(req->name,tmp);
-        name_len=strlen(req->name);
+    if(*token=='\n')//this is a LEAVE
+        return req;
+    else{//is a REGISTER|STORE|RETRIEVE|DELETE, storing NAME
+        req->name=malloc(strlen(token)+1);
+        strcpy(req->name,token);
     }
 
-    if(req->com!=STORE) return req;
+    token=__strtok_r(NULL," ",&ptr);
+    if(token==NULL) {req->valid=0;fprintf(stderr,"Wrong command syntax.\n"); return req;}
 
-    //Handling STORE command
+    if(*token=='\n')//this is not a STORE, it doesn't have LEN field
+        return req;
+    else{//is a STORE, storing LEN
+        req->len=strtol(token,NULL,10);
+    }
 
-    tmp=__strtok_r(NULL," ",&ptr);
-    if(tmp==NULL) { req->valid=0;sendko(fd,"Wrong syntax."); return req;}
-    len_len=strlen(tmp);
-    req->len=atoi(tmp);;
+    token=__strtok_r(NULL," ",&ptr);
+    if(token==NULL || *token!='\n') { req->valid=0;fprintf(stderr,"Wrong command syntax.\n"); return req;}
 
-    *header_len=com_len+name_len+len_len+5;//5= 1 '\n' + 4 ' ' (+1 after STORE,+1 after NAME,+1 after DATALEN & +1 after '\n')
-    tmp=__strtok_r(NULL," ",&ptr);//ptr should now point to the start of the message "data" field
-    int residue=MAX_BUFFSIZE-*header_len;
-    if(residue>req->len){
-        req->data=calloc(req->len,sizeof(char));
-        memcpy(req->data,tmp+2,req->len);
-        if(VERBOSE){ fprintf(stderr,"Allocating directly in req->data: ");
-        fwrite(req->data,1,req->len,stderr);
-        fprintf(stderr,"\n");
+    //read the one space character left in socket after '\n' to check if header is valid
+    char space;
+    if(readn(fd,&space,1)>0){
+        if(space!=' ') {
+            req->valid=0;
+            if(VERBOSE){
+                fprintf(stderr,"tomsg: store parsing, no space character found after newline. Character is ");
+                if(space) fprintf(stderr,"-%c-\n",space);
+                else fprintf(stderr,"invalid.\n");
+            }
+            return req;
         }
     }
-    else req->data=ptr;
+    else{
+        req->valid=0;
+        if(VERBOSE) fprintf(stderr,"tomsg: Couldn't complete header parsing.");
+    }
     return req;
 }
 void printmsg(msg* message){
@@ -93,9 +102,5 @@ void printmsg(msg* message){
         printf("Name: %s\n",message->name);
         if(message->com!=STORE) return;
         printf("Length: %u\n",message->len);
-        printf("(String) Data block: ");
-        fwrite(message->data,1,sizeof(message->data),stdout);
-        printf("\n");
     }
-    return;
 }

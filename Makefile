@@ -40,7 +40,7 @@ support.o: support.c support.h
 	$(CC) $(CFLAGS0) $< -o $@
 
 test: cleardata#prima c'era \@ ./os_server &
-	./testscript.sh 1
+	./testscript.sh 50
 
 cleardata:
 	@$(RM) -r data/*

@@ -1,31 +1,78 @@
 #include "objstore.h"
 #include "support.h"
+#include <assert.h>
 
-#define ERRSTR_LEN 128
-//TO DO: convertire write in send
-static int cfd=-1,ret;
-static int connected=0,letti;
-char* request=NULL,*answer=NULL;
-char* errstr[ERRSTR_LEN];
+static int cfd=-1;
+static int connected=0;
+char answer[OKO_MAXLEN];
 
-#define except_retrieve(cfd,answer,fun)\
-    if((letti=s_readline(cfd,answer,MAX_HEADER))){\
-        if(letti){\
-            answer[letti]='\0';\
-            fprintf(stderr,"%s",answer);\
-            if(answer[0]=='O') ret=1;\
-            else ret=0;\
-        }\
-        else ret=0;\
-    }\
-    else{\
-        fprintf(stderr,"%s: impossible to read from server.\n",fun);\
-        ret=0;\
-    }\
-    free(answer);
+char* getdata(int datalen){
+    char* databuf=malloc(sizeof(char)*(datalen+1));//+1 for the terminator \0, to allow the client to perform strlen(block)
+    char space;
+    if(readn(cfd,&space,1)!=1){
+        if(VERBOSE)
+            fprintf(stderr,"getdata: readn failed. Missing space after newline in retrieve answer.\n");
+        return NULL;
+    }
+    if(space!=' '){
+        if(VERBOSE)
+            fprintf(stderr,"getdata: readn failed. Missing space after newline in retrieve answer.\n");
+        return NULL;
+    }
+    if(readn(cfd,databuf,datalen)!=datalen){
+        if(VERBOSE)
+            fprintf(stderr,"getdata: readn failed.\n");
+        return NULL;
+    }
+    databuf[datalen]='\0';
+    return databuf;
+}
+int getko(char* answer,char* fun){
+    if(!strncmp(answer,"KO ",3)){
+        assert(((strlen(answer)-1)==strcspn(answer,"\n")));
+        printf("%s",answer);
+        return 0;
+    }
+    else{
+        fprintf(stderr,"Irregular response from server.\n");
+        return -1;
+    }
+}
+//0: KO, 1:OK, -1:error retrieving answer.
+int getoko(char* answer,char* fun,char** data){
+    int red;
+    if((red=getheader(cfd,answer,OKO_MAXLEN))>0){//in the RETRIEVE answer case I still have to read the space before the data block
+        if(!strcmp(fun,"os_retrieve")){
+            if(!strncmp(answer,"DATA ",5)){
+                char* ptr;
+                char* token=__strtok_r(answer+5," ",&ptr);
+                if(token==NULL) {if(VERBOSE) fprintf(stderr,"%s: getoko: invalid header length field.\n",fun);return 0;}
+                int datalen=strtol(token,NULL,10);
+                int headerlen=strlen(answer)+2;//answer is tokenized (\0) right after LEN field
+                if(VERBOSE) fprintf(stderr,"headerlen %d\n",headerlen);
+                if(*(answer+headerlen-1)!='\n') {if(VERBOSE) fprintf(stderr,"%s: getoko: invalid message termination, missing newline. Character is: %c\n",fun,*(answer+headerlen-1));return 0;}
+                char* datablock=getdata(datalen);
+                if(datablock==NULL) return -1;
+                else {*data=datablock;return 1;}
+            }
+        }
+        else{
+            if(!strncmp(answer,"OK \n",4)) {
+                answer[red]='\0';
+                printf("%s",answer);
+                return 1;
+            }
+        }
+        return getko(answer,fun);
+    }
+    else{
+        fprintf(stderr,"%s: getheader failed. red %d bytes.\n",fun,red);
+        return -1;
+    }
+}
+    
 
 int os_connect(char *name){
-    
     if(!connected){
         struct sockaddr_un addr;      
         strcpy(addr.sun_path, SOCKNAME);
@@ -33,133 +80,91 @@ int os_connect(char *name){
         ifmeno_usr(cfd=socket(addr.sun_family,SOCK_STREAM,0),"os_connect: problems creating socket");
         ifmeno_usr(connect(cfd,(struct sockaddr*)&addr,sizeof(addr)),"os_connect: problems with connect: ");
         connected=1;
-        //int len=strlen("REGISTER  \n")+strlen(name);
-        //request=calloc(len,sizeof(char));
-        answer=malloc(64);//40= maximum server answer size for STORE
-        dprintf(cfd,"REGISTER %s \n",name);
-        //int scritti;
-        //if((scritti=send(cfd,request,len,0))!=len) fprintf(stderr,"os_connect: problems sending request.");
-        //if(VERBOSE) printf("Scritti sul socket=strlen(request)? %d\n",scritti==len);
-        except_retrieve(cfd,answer,"os_connect");
+        if(dprintf(cfd,"REGISTER %s \n",name)<0){
+            fprintf(stderr,"os_connect: write on socket failed.\n");
+            return 0;
+        }
+        return getoko(answer,"os_connect",NULL);
     }
     else {
         fprintf(stderr,"os_connect: already connected.\n");
-        ret=0;
+        return 0;
     }
-    return ret;
 }
 
 int os_disconnect(){
     if(connected){
-        //request=malloc(1);//for except_retrieve macro compatibility
-        answer=malloc(sizeof(char)*64);
-        dprintf(cfd,"LEAVE \n");
-        except_retrieve(cfd,answer,"os_disconnect");
+        if(dprintf(cfd,"LEAVE \n")<0){
+            fprintf(stderr,"os_disconnect: write on socket failed.\n");
+            return 0;
+        }
         connected=0;
-
+        int ret=getoko(answer,"os_disconnect",NULL);
         close(cfd);
-        ret=1;
+        return ret;
     }
     else{
         fprintf(stderr,"os_disconnect: client needs to call os_connect first.\n");
-        ret=0;
+        return 0;
     }
-    return ret;
 }
 int os_delete(char *name){
     if(name && connected) {
-        //int len=(strlen("DELETE  \n")+strlen(name));
-        //request=calloc(len,sizeof(char));
-        answer=malloc(sizeof(char)*64);
-        //snprintf(request,len,"DELETE %s \n",name);
-        if(dprintf(cfd,"DELETE %s \n",name)) {
+        if(dprintf(cfd,"DELETE %s \n",name)<0) {
             fprintf(stderr,"os_delete: write on socket failed.\n");
-            free(request);
-            free(answer);
-            ret=0;
+            return 0;
         }
-        else{
-            except_retrieve(cfd,answer,"os_delete");
-        }
+        else
+            return getoko(answer,"os_delete",NULL);
     }
     else {
         if(!connected) printf("os_delete: not connected.\n");
         if(!name) printf("os_delete: invalid name.\n");
-        ret=0;
+        return 0;
     }
-    return ret;
 }
 int os_store(char *name, void *block, size_t len){
-    if(name && connected) {
-        answer=malloc(sizeof(char)*64);
-        int dim;
-        char* request=malloc(sizeof(char)*(1+MAX_HEADER +len));
+    if(name && connected &&len>=1 && block!=NULL) {
+        if(dprintf(cfd,"STORE %s %zu \n ",name,len)<0){
+            fprintf(stderr,"os_store: write of header on socket failed.\n");
+            perror("os_store: dprintf: ");
+            return 0;
+        }
 
-        sprintf(request,"STORE %s %zu \n %s",name,len,(char*)block);
-        dim=strlen(request);
-        if(send(cfd,request,dim,0)!=dim){
-            fprintf(stderr,"os_store: write of data block on socket failed.");
-            free(answer);
-            free(request);
-            ret=0;
+        if(writen(cfd,(char*)block,len)<0){
+            fprintf(stderr,"os_store: write of data block on socket failed.\n");
+            return 0;
         }
-        else{
-            free(request);
-            except_retrieve(cfd,answer,"os_store");
-        }
+        else
+            return getoko(answer,"os_store",NULL);
     }
     else {
+        if(block==NULL) fprintf(stderr,"os_store: invalid block.\n");
+        if(len<1) fprintf(stderr,"os_store: invalid block len.\n");
         if(!connected) fprintf(stderr,"os_store: not connected.\n");
-        if(!name) printf("os_store: invalid name.\n");
-        ret=0;
+        if(!name) fprintf(stderr,"os_store: invalid name.\n");
+        return 0;
     }
-    return ret;
 }
 void *os_retrieve(char *name){
-    void* ret_v=NULL;
+    char* ret_v=NULL;
     if(name && connected) {
-        int len=strlen("RETRIEVE  \n")+strlen(name);
-        request=malloc(len);
-        snprintf(request,len,"RETRIEVE %s \n",name);
-        if(send(cfd,request,len,0)!=len) {
+        if(dprintf(cfd,"RETRIEVE %s \n",name)<0) {
             perror("os_retrieve: ");
+            return NULL;
         }
         else{
-            char* buf=malloc(MAX_BUFFSIZE);
-            int red;
-            if((red=s_readline(cfd,buf,MAX_BUFFSIZE))>0){
-                if(!strncmp(buf,"DATA ",5)){
-                    if(VERBOSE) {fprintf(stderr,"os_retrieve: complete message: ");fwrite(buf,1,red,stderr);fprintf(stderr,"\n");}
-                    char* ptr,*tmp;
-                    __strtok_r(buf," ",&ptr);
-                    tmp=__strtok_r(NULL," ",&ptr);
-                    int datalen=atoi(tmp);
-                    if(VERBOSE) fprintf(stderr,"os_retrieve: message len=%d\n",datalen);
-                    tmp=__strtok_r(NULL," ",&ptr);//ptr should now point to the start of the message "data" field
-                    if(VERBOSE) {fprintf(stderr,"os_retrieve: message data:");fwrite(ptr,1,datalen,stderr);fprintf(stderr,"\n");}
-                    ret_v=malloc(datalen);
-                    memcpy(ret_v,ptr,datalen);
-                    if(VERBOSE) {
-                        fprintf(stderr,"os_retrieve: ");
-                        if(ret_v==NULL) fprintf(stderr,"ret_v=NULL");
-                        else fwrite(ret_v,1,datalen,stderr);
-                        fprintf(stderr,"\n");
-                    } 
-                    free(buf);
-                }
-                else{
-                    fprintf(stderr,"os_retrieve: communication protocol error.\n");
-                }
-            }
-            else{
-                fprintf(stderr,"os_retrieve: invalid read from socket.\n");
-            }
+            int ret;
+            if((ret=getoko(answer,"os_retrieve",&ret_v))==1)
+                return (void*)ret_v;
+            if(VERBOSE) fprintf(stderr,"os_retrieve: getoko returned %d\n",ret);
+            else return NULL;
         }
-        free(request);
     }
     else {
         if(!connected) fprintf(stderr,"os_store: not connected.\n");
         if(!name) printf("os_store: invalid name.\n");
+        return NULL;
     }
-    return ret_v;
+    return NULL;
 }
